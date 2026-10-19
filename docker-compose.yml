@@ -1,0 +1,52 @@
+name: shopcore
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: shopcore
+      POSTGRES_PASSWORD: shopcore
+      POSTGRES_DB: shopcore
+    ports: ['5432:5432']
+    volumes: [pgdata:/var/lib/postgresql]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U shopcore -d shopcore']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports: ['6379:6379']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    profiles: [app]
+    build: .
+    command: ['node_modules/.bin/prisma', 'migrate', 'deploy']
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://shopcore:shopcore@postgres:5432/shopcore
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    profiles: [app]
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://shopcore:shopcore@postgres:5432/shopcore
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: production
+    ports: ['3000:3000']
+    init: true
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+volumes:
+  pgdata:

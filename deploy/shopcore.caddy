@@ -1,0 +1,15 @@
+shopcore-api.{$DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy shopcore-api:3000 {
+		health_uri /health/live
+		health_interval 30s
+	}
+	header -Server
+	log {
+		output stdout
+		format json
+	}
+}

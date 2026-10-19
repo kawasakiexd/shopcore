@@ -1,0 +1,282 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+
+  @@map("role")
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+
+  @@map("product_status")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  EXPIRED
+
+  @@map("order_status")
+}
+
+enum PaymentStatus {
+  OPEN
+  SUCCEEDED
+  EXPIRED
+  REFUNDED
+
+  @@map("payment_status")
+}
+
+enum ActorType {
+  SYSTEM
+  CUSTOMER
+  ADMIN
+
+  @@map("actor_type")
+}
+
+enum TokenRevokeReason {
+  ROTATED
+  LOGOUT
+  LOGOUT_ALL
+  REUSE_DETECTED
+  PASSWORD_CHANGED
+  USER_BLOCKED
+
+  @@map("token_revoke_reason")
+}
+
+model User {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  email        String   @unique @db.VarChar(254)
+  passwordHash String   @map("password_hash")
+  name         String   @db.VarChar(80)
+  role         Role     @default(CUSTOMER)
+  isBlocked    Boolean  @default(false) @map("is_blocked")
+  isProtected  Boolean  @default(false) @map("is_protected")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  refreshTokens RefreshToken[]
+  cartItems     CartItem[]
+  orders        Order[]
+  statusChanges OrderStatusChange[]
+
+  @@index([createdAt])
+  @@index([role, createdAt])
+  @@map("users")
+}
+
+model RefreshToken {
+  id            String             @id @default(uuid(7)) @db.Uuid
+  userId        String             @map("user_id") @db.Uuid
+  familyId      String             @map("family_id") @db.Uuid
+  parentId      String?            @map("parent_id") @db.Uuid
+  tokenHash     String             @unique @map("token_hash") @db.Char(64)
+  expiresAt     DateTime           @map("expires_at") @db.Timestamptz(3)
+  revokedAt     DateTime?          @map("revoked_at") @db.Timestamptz(3)
+  revokedReason TokenRevokeReason? @map("revoked_reason")
+  ip            String?            @db.VarChar(45)
+  userAgent     String?            @map("user_agent") @db.VarChar(255)
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Category {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String   @db.VarChar(60)
+  slug        String   @unique @db.VarChar(80)
+  description String?  @db.VarChar(500)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  products Product[]
+
+  @@index([position, name])
+  @@map("categories")
+}
+
+model Product {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  categoryId  String        @map("category_id") @db.Uuid
+  name        String        @db.VarChar(120)
+  slug        String        @unique @db.VarChar(140)
+  sku         String        @unique @db.VarChar(40)
+  description String        @db.VarChar(5000)
+  priceAmount Int           @map("price_amount")
+  currency    String        @default("USD") @db.Char(3)
+  stock       Int           @default(0)
+  status      ProductStatus @default(DRAFT)
+  archivedAt  DateTime?     @map("archived_at") @db.Timestamptz(3)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  category   Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  images     ProductImage[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([status, categoryId])
+  @@index([status, priceAmount])
+  @@index([status, createdAt])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "products_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "products_description_trgm_idx")
+  @@map("products")
+}
+
+model ProductImage {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  key         String   @unique @db.VarChar(300)
+  alt         String?  @db.VarChar(200)
+  position    Int      @default(0)
+  contentType String   @map("content_type") @db.VarChar(50)
+  sizeBytes   Int      @map("size_bytes")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
+  @@map("product_images")
+}
+
+model CartItem {
+  userId    String   @map("user_id") @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  quantity  Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([userId, productId])
+  @@index([productId])
+  @@map("cart_items")
+}
+
+model Order {
+  id              String      @id @default(uuid(7)) @db.Uuid
+  number          Int         @unique @default(autoincrement())
+  userId          String      @map("user_id") @db.Uuid
+  status          OrderStatus @default(PENDING)
+  currency        String      @db.Char(3)
+  subtotalAmount  Int         @map("subtotal_amount")
+  totalAmount     Int         @map("total_amount")
+  shippingAddress Json        @map("shipping_address")
+  note            String?     @db.VarChar(500)
+  trackingNumber  String?     @map("tracking_number") @db.VarChar(64)
+  expiresAt       DateTime    @map("expires_at") @db.Timestamptz(3)
+  paidAt          DateTime?   @map("paid_at") @db.Timestamptz(3)
+  shippedAt       DateTime?   @map("shipped_at") @db.Timestamptz(3)
+  deliveredAt     DateTime?   @map("delivered_at") @db.Timestamptz(3)
+  cancelledAt     DateTime?   @map("cancelled_at") @db.Timestamptz(3)
+  expiredAt       DateTime?   @map("expired_at") @db.Timestamptz(3)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  items         OrderItem[]
+  payments      Payment[]
+  statusChanges OrderStatusChange[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
+  @@index([paidAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String  @id @default(uuid(7)) @db.Uuid
+  orderId         String  @map("order_id") @db.Uuid
+  productId       String  @map("product_id") @db.Uuid
+  productName     String  @map("product_name") @db.VarChar(120)
+  productSlug     String  @map("product_slug") @db.VarChar(140)
+  productSku      String  @map("product_sku") @db.VarChar(40)
+  imageKey        String? @map("image_key") @db.VarChar(300)
+  unitPriceAmount Int     @map("unit_price_amount")
+  quantity        Int
+  lineTotalAmount Int     @map("line_total_amount")
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id                    String        @id @default(uuid(7)) @db.Uuid
+  orderId               String        @map("order_id") @db.Uuid
+  status                PaymentStatus @default(OPEN)
+  stripeSessionId       String        @unique @map("stripe_session_id") @db.VarChar(255)
+  stripePaymentIntentId String?       @unique @map("stripe_payment_intent_id") @db.VarChar(255)
+  checkoutUrl           String?       @map("checkout_url")
+  amount                Int
+  currency              String        @db.Char(3)
+  expiresAt             DateTime      @map("expires_at") @db.Timestamptz(3)
+  succeededAt           DateTime?     @map("succeeded_at") @db.Timestamptz(3)
+  refundedAt            DateTime?     @map("refunded_at") @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, status])
+  @@map("payments")
+}
+
+model OrderStatusChange {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  orderId     String       @map("order_id") @db.Uuid
+  fromStatus  OrderStatus? @map("from_status")
+  toStatus    OrderStatus  @map("to_status")
+  actorType   ActorType    @map("actor_type")
+  actorUserId String?      @map("actor_user_id") @db.Uuid
+  note        String?      @db.VarChar(500)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@map("order_status_changes")
+}
+
+model StripeEvent {
+  id              String   @id @db.VarChar(255)
+  type            String   @db.VarChar(100)
+  stripeCreatedAt DateTime @map("stripe_created_at") @db.Timestamptz(3)
+  processedAt     DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
+
+  @@index([processedAt])
+  @@map("stripe_events")
+}
